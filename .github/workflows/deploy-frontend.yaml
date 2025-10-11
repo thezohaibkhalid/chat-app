@@ -17,6 +17,11 @@ jobs:
       - name: Docker build (dry-run)
         run: docker build -t dry-run:test ./frontend
 
+
+      - name: Install rsync
+        run: sudo apt-get install -y rsync
+
+
       - name: Rsync frontend to VM
         uses: burnett01/rsync-deployments@6.0.0
         with:
