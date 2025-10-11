@@ -1,4 +1,4 @@
-name: Deploy Frontend via Docker Hub
+name: Deploy Monolith 
 
 on:
   push:
@@ -6,13 +6,11 @@ on:
   workflow_dispatch:
 
 env:
-  APP_NAME: chat-frontend
-  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/chat-frontend
+  APP_NAME: chat-app
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/chat-app
   IMAGE_TAG: ${{ github.sha }}
-  VITE_STEAM_API_KEY: ${{ secrets.VITE_STEAM_API_KEY }}
-  VITE_BASE_URL: ${{ secrets.VITE_BASE_URL }}
-  NODE_ENV: ${{ secrets.NODE_ENV }}
-  HEALTH_PATH: /
+
+  VITE_BASE_URL: /api
 
 jobs:
   build_and_push:
@@ -27,20 +25,15 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
+          context: .
+          file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           build-args: |
-            VITE_STEAM_API_KEY=${{ env.VITE_STEAM_API_KEY }}
             VITE_BASE_URL=${{ env.VITE_BASE_URL }}
-            NODE_ENV=${{ env.NODE_ENV }}
           tags: |
             ${{ env.DOCKER_IMAGE }}:latest
             ${{ env.DOCKER_IMAGE }}:${{ env.IMAGE_TAG }}
-          labels: |
-            org.opencontainers.image.source=${{ github.repository }}
-            app=${{ env.APP_NAME }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -55,15 +48,15 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           key: ${{ secrets.SSH_KEY }}
           script_stop: true
-          envs: APP_NAME,DOCKER_IMAGE,IMAGE_TAG,HEALTH_PATH
+          envs: APP_NAME,DOCKER_IMAGE,IMAGE_TAG
           script: |
             set -euo pipefail
-            APP="${APP_NAME:-chat-frontend}"
+            APP="${APP_NAME:-chat-app}"
             IMG_SHA="${DOCKER_IMAGE}:${IMAGE_TAG}"
             IMG_LATEST="${DOCKER_IMAGE}:latest"
             LIVE="${APP}"
             NEW="${APP}-new"
-            PORT_LIVE=5000
+            HOST_PORT=3000
 
             if ! command -v docker >/dev/null 2>&1; then
               sudo apt-get update -y
@@ -77,40 +70,55 @@ jobs:
             if docker image inspect "${IMG_SHA}" >/dev/null 2>&1; then IMG="${IMG_SHA}"; else IMG="${IMG_LATEST}"; fi
 
             docker rm -f "${NEW}" >/dev/null 2>&1 || true
-            docker run -d --name "${NEW}" --label app="${APP}" --restart unless-stopped "${IMG}"
+            docker run -d --name "${NEW}" \
+              --restart unless-stopped \
+              -e NODE_ENV=production \
+              -e PORT=${{ secrets.PORT || 3000 }} \
+              -e MONGO_URI="${{ secrets.MONGO_URI }}" \
+              -e STEAM_API_KEY="${{ secrets.STEAM_API_KEY }}" \
+              -e STEAM_API_SECRET="${{ secrets.STEAM_API_SECRET }}" \
+              -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
+              "${IMG}"
 
             NEW_IP=""
             for i in $(seq 1 60); do
               NEW_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${NEW}" 2>/dev/null || true)"
-              if [ -n "$NEW_IP" ] && curl -fsS "http://${NEW_IP}:5000${HEALTH_PATH}" >/dev/null 2>&1; then break; fi
+              if [ -n "$NEW_IP" ] && curl -fsS "http://${NEW_IP}:3000/" >/dev/null 2>&1; then
+                echo "NEW healthy at ${NEW_IP}:3000"
+                break
+              fi
               sleep 2
             done
-            [ -n "$NEW_IP" ] && curl -fsS "http://${NEW_IP}:5000${HEALTH_PATH}" >/dev/null
+            [ -n "$NEW_IP" ] && curl -fsS "http://${NEW_IP}:3000/" >/dev/null
 
-            docker ps --filter "publish=${PORT_LIVE}" -q | xargs -r docker rm -f || true
+            docker ps --filter "publish=${HOST_PORT}" -q | xargs -r docker rm -f || true
             docker rm -f "${LIVE}" >/dev/null 2>&1 || true
-
-            if ss -tlpn | grep -qE "LISTEN.+:${PORT_LIVE}\b"; then
-              echo "Port ${PORT_LIVE} is in use by:" >&2
-              ss -tlpn | grep -E "LISTEN.+:${PORT_LIVE}\b" >&2
-              docker logs --tail 200 "${NEW}" || true
-              docker rm -f "${NEW}" || true
-              exit 1
+            if ss -tlpn | grep -qE "LISTEN.+:${HOST_PORT}\b"; then
+              PIDS="$(ss -tlpn | awk '/:3000/{print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)"
+              [ -n "$PIDS" ] && sudo kill -TERM $PIDS || true
+              sleep 2
+              ss -tlpn | grep -qE "LISTEN.+:${HOST_PORT}\b" && sudo kill -KILL $PIDS || true
+              sleep 1
             fi
+            ss -tlpn | grep -qE "LISTEN.+:${HOST_PORT}\b" && { echo "Port 3000 still busy"; docker rm -f "${NEW}" || true; exit 1; }
 
             docker run -d --name "${LIVE}" \
-              -p 127.0.0.1:${PORT_LIVE}:5000 \
-              --label app="${APP}" \
+              -p 127.0.0.1:${HOST_PORT}:3000 \
               --restart unless-stopped \
+              -e NODE_ENV=production \
+              -e PORT=${{ secrets.PORT || 3000 }} \
+              -e MONGO_URI="${{ secrets.MONGO_URI }}" \
+              -e STEAM_API_KEY="${{ secrets.STEAM_API_KEY }}" \
+              -e STEAM_API_SECRET="${{ secrets.STEAM_API_SECRET }}" \
+              -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
               "${IMG}"
 
             for i in $(seq 1 30); do
-              if curl -fsS "http://127.0.0.1:${PORT_LIVE}${HEALTH_PATH}" >/dev/null 2>&1; then break; fi
+              curl -fsS "http://127.0.0.1:${HOST_PORT}/" >/dev/null 2>&1 && break
               sleep 2
             done
-            curl -fsS "http://127.0.0.1:${PORT_LIVE}${HEALTH_PATH}" >/dev/null
+            curl -fsS "http://127.0.0.1:${HOST_PORT}/" >/dev/null
 
             docker rm -f "${NEW}" >/dev/null 2>&1 || true
-
             docker container prune -f >/dev/null 2>&1 || true
             docker image prune -a -f >/dev/null 2>&1 || true
