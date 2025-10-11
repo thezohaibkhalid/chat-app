@@ -4,6 +4,8 @@
     RUN npm ci
     ARG VITE_BASE_URL
     ENV VITE_BASE_URL=$VITE_BASE_URL
+    ARG VITE_STREAM_API_KEY
+    ENV VITE_STREAM_API_KEY=$VITE_STREAM_API_KEY
     COPY frontend/ .
     RUN npm run build
     
