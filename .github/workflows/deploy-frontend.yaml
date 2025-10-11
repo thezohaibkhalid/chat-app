@@ -44,107 +44,73 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build_and_push
+    steps:
+      - uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          port: ${{ secrets.SSH_PORT }}
+          key: ${{ secrets.SSH_KEY }}
+          script_stop: true
+          envs: APP_NAME,DOCKER_IMAGE,IMAGE_TAG,HEALTH_PATH
+          script: |
+            set -euo pipefail
+            APP="${APP_NAME:-chat-frontend}"
+            IMG_SHA="${DOCKER_IMAGE}:${IMAGE_TAG}"
+            IMG_LATEST="${DOCKER_IMAGE}:latest"
+            LIVE="${APP}"
+            NEW="${APP}-new"
+            PORT_LIVE=5000
 
+            if ! command -v docker >/dev/null 2>&1; then
+              sudo apt-get update -y
+              sudo apt-get remove -y containerd.io || true
+              sudo apt-get install -y docker.io docker-compose-plugin
+              sudo systemctl enable --now docker
+            fi
 
-    deploy:
-      runs-on: ubuntu-latest
-      needs: build_and_push
-      steps:
-        - name: Deploy on VM (kill-anything-on-5000 then swap)
-          uses: appleboy/ssh-action@v1.2.0
-          with:
-            host: ${{ secrets.SSH_HOST }}
-            username: ${{ secrets.SSH_USER }}
-            port: ${{ secrets.SSH_PORT }}
-            key: ${{ secrets.SSH_KEY }}
-            script_stop: true
-            envs: APP_NAME,DOCKER_IMAGE,IMAGE_TAG
-            script: |
-              set -euo pipefail
-              APP_NAME="${APP_NAME:-chat-frontend}"
-              DOCKER_IMAGE="${DOCKER_IMAGE:-${{ secrets.DOCKERHUB_USERNAME }}/chat-frontend}"
-              IMAGE_TAG="${IMAGE_TAG:-${{ github.sha }}}"
-              LIVE="${APP_NAME}"
-              NEW="${APP_NAME}-new"
-              PORT_LIVE=5000
-              HEALTH_PATH="/"
+            docker pull "${IMG_SHA}" || true
+            docker pull "${IMG_LATEST}" || true
+            if docker image inspect "${IMG_SHA}" >/dev/null 2>&1; then IMG="${IMG_SHA}"; else IMG="${IMG_LATEST}"; fi
 
-              if ! command -v docker >/dev/null 2>&1; then
-                sudo apt-get update -y
-                sudo apt-get remove -y containerd.io || true
-                sudo apt-get install -y docker.io docker-compose-plugin
-                sudo systemctl enable --now docker
-              fi
+            docker rm -f "${NEW}" >/dev/null 2>&1 || true
+            docker run -d --name "${NEW}" --label app="${APP}" --restart unless-stopped "${IMG}"
 
-              docker pull "${DOCKER_IMAGE}:${IMAGE_TAG}" || true
-              docker pull "${DOCKER_IMAGE}:latest" || true
-              if docker image inspect "${DOCKER_IMAGE}:${IMAGE_TAG}" >/dev/null 2>&1; then IMG="${DOCKER_IMAGE}:${IMAGE_TAG}"; else IMG="${DOCKER_IMAGE}:latest"; fi
+            NEW_IP=""
+            for i in $(seq 1 60); do
+              NEW_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${NEW}" 2>/dev/null || true)"
+              if [ -n "$NEW_IP" ] && curl -fsS "http://${NEW_IP}:5000${HEALTH_PATH}" >/dev/null 2>&1; then break; fi
+              sleep 2
+            done
+            [ -n "$NEW_IP" ] && curl -fsS "http://${NEW_IP}:5000${HEALTH_PATH}" >/dev/null
 
-              # 1) Run NEW without publishing a host port
-              docker rm -f "${NEW}" >/dev/null 2>&1 || true
-              docker run -d --name "${NEW}" --restart unless-stopped "${IMG}"
+            docker ps --filter "publish=${PORT_LIVE}" -q | xargs -r docker rm -f || true
+            docker rm -f "${LIVE}" >/dev/null 2>&1 || true
 
-              # 2) Health check NEW via its container IP:5000
-              NEW_IP=""
-              for i in $(seq 1 60); do
-                NEW_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${NEW}" 2>/dev/null || true)"
-                if [ -n "$NEW_IP" ] && curl -fsS "http://${NEW_IP}:5000${HEALTH_PATH}" >/dev/null 2>&1; then
-                  echo "NEW healthy at ${NEW_IP}:5000"
-                  break
-                fi
-                sleep 2
-              done
-              if [ -z "$NEW_IP" ] || ! curl -fsS "http://${NEW_IP}:5000${HEALTH_PATH}" >/dev/null 2>&1; then
-                echo "NEW failed health; recent logs:" >&2
-                docker logs --tail 200 "${NEW}" >&2 || true
-                docker rm -f "${NEW}" || true
-                exit 1
-              fi
+            if ss -tlpn | grep -qE "LISTEN.+:${PORT_LIVE}\b"; then
+              echo "Port ${PORT_LIVE} is in use by:" >&2
+              ss -tlpn | grep -E "LISTEN.+:${PORT_LIVE}\b" >&2
+              docker logs --tail 200 "${NEW}" || true
+              docker rm -f "${NEW}" || true
+              exit 1
+            fi
 
-              # 3) Force-free port 5000
-              # 3a) Any Docker container publishing 5000
-              docker ps --filter "publish=${PORT_LIVE}" -q | xargs -r docker rm -f || true
-              docker rm -f "${LIVE}" >/dev/null 2>&1 || true
+            docker run -d --name "${LIVE}" \
+              -p 127.0.0.1:${PORT_LIVE}:5000 \
+              --label app="${APP}" \
+              --restart unless-stopped \
+              "${IMG}"
 
-              # 3b) If a non-Docker process holds 5000, kill it (TERM then KILL)
-              if ss -tlpn | grep -qE "LISTEN.+:${PORT_LIVE}\b"; then
-                echo "Port ${PORT_LIVE} in use; killing holder…" >&2
-                PIDS="$(ss -tlpn | awk -v p=":${PORT_LIVE}" '$0 ~ p {print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | sort -u)"
-                if [ -n "$PIDS" ]; then
-                  echo "PIDs: $PIDS" >&2
-                  sudo kill -TERM $PIDS || true
-                  sleep 2
-                  if ss -tlpn | grep -qE "LISTEN.+:${PORT_LIVE}\b"; then
-                    sudo kill -KILL $PIDS || true
-                    sleep 1
-                  fi
-                fi
-              fi
+            for i in $(seq 1 30); do
+              if curl -fsS "http://127.0.0.1:${PORT_LIVE}${HEALTH_PATH}" >/dev/null 2>&1; then break; fi
+              sleep 2
+            done
+            curl -fsS "http://127.0.0.1:${PORT_LIVE}${HEALTH_PATH}" >/dev/null
 
-              # Final verify port is free
-              if ss -tlpn | grep -qE "LISTEN.+:${PORT_LIVE}\b"; then
-                echo "Port ${PORT_LIVE} still busy; owner:" >&2
-                ss -tlpn | grep -E "LISTEN.+:${PORT_LIVE}\b" >&2
-                docker rm -f "${NEW}" || true
-                exit 1
-              fi
+            docker rm -f "${NEW}" >/dev/null 2>&1 || true
 
-              # 4) Start LIVE on 127.0.0.1:5000
-              docker run -d --name "${LIVE}" \
-                -p 127.0.0.1:${PORT_LIVE}:5000 \
-                --restart unless-stopped \
-                "${IMG}"
-
-              # 5) Verify LIVE via host port
-              for i in $(seq 1 30); do
-                if curl -fsS "http://127.0.0.1:${PORT_LIVE}${HEALTH_PATH}" >/dev/null 2>&1; then
-                  break
-                fi
-                sleep 2
-              done
-              curl -fsS "http://127.0.0.1:${PORT_LIVE}${HEALTH_PATH}" >/dev/null
-
-              # 6) Cleanup
-              docker rm -f "${NEW}" >/dev/null 2>&1 || true
-              docker container prune -f >/dev/null 2>&1 || true
-              docker image prune -a -f >/dev/null 2>&1 || true
+            docker container prune -f >/dev/null 2>&1 || true
+            docker image prune -a -f >/dev/null 2>&1 || true
