@@ -11,6 +11,7 @@ env:
   IMAGE_TAG: ${{ github.sha }}
 
   VITE_BASE_URL: /api
+  VITE_STREAM_API_KEY: ${{ secrets.VITE_STREAM_API_KEY }}
 
 jobs:
   build_and_push:
