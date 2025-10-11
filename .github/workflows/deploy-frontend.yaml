@@ -32,7 +32,6 @@ jobs:
           build-args: |
             VITE_BASE_URL=${{ env.VITE_BASE_URL }}
             VITE_STREAM_API_KEY=${{ env.VITE_STREAM_API_KEY }}
-            VITE_STREAM_API_SECRET=${{ env.VITE_STREAM_API_SECRET }}
           tags: |
             ${{ env.DOCKER_IMAGE }}:latest
             ${{ env.DOCKER_IMAGE }}:${{ env.IMAGE_TAG }}
@@ -109,6 +108,7 @@ jobs:
               -e STEAM_API_KEY="${STEAM_API_KEY}" \
               -e STEAM_API_SECRET="${STEAM_API_SECRET}" \
               -e JWT_SECRET_KEY="${JWT_SECRET_KEY}" \
+              -e VITE_STREAM_API_KEY="${VITE_STREAM_API_KEY}" \
               "${IMG}"
 
             for i in $(seq 1 40); do
