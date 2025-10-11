@@ -15,10 +15,18 @@ const PORT = process.env.PORT;
 
 const __dirname = path.resolve();
 
+const ALLOWED_ORIGINS = new Set([
+  "http://localhost:5173",
+  "http://localhost:5001",
+  `${process.env.LIVE_URL}`,
+]);
 app.use(
   cors({
-    origin: "http://localhost:5173",
-    credentials: true,  
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      return cb(null, ALLOWED_ORIGINS.has(origin));
+    },
+    credentials: true,
   })
 );
 
