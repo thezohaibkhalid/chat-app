@@ -31,6 +31,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             VITE_BASE_URL=${{ env.VITE_BASE_URL }}
+            VITE_STREAM_API_KEY=${{ env.VITE_STREAM_API_KEY }}
+            VITE_STREAM_API_SECRET=${{ env.VITE_STREAM_API_SECRET }}
           tags: |
             ${{ env.DOCKER_IMAGE }}:latest
             ${{ env.DOCKER_IMAGE }}:${{ env.IMAGE_TAG }}
@@ -52,13 +54,14 @@ jobs:
           STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
           STEAM_API_SECRET: ${{ secrets.STEAM_API_SECRET }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          VITE_STREAM_API_KEY: ${{ secrets.VITE_STREAM_API_KEY }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
           timeout: 30m
-          envs: APP_NAME,DOCKER_IMAGE,IMAGE_TAG,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,MONGO_URI,STEAM_API_KEY,STEAM_API_SECRET,JWT_SECRET_KEY
+          envs: APP_NAME,DOCKER_IMAGE,IMAGE_TAG,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,MONGO_URI,STEAM_API_KEY,STEAM_API_SECRET,JWT_SECRET_KEY,VITE_STREAM_API_KEY
           script: |
             set -euo pipefail
 
