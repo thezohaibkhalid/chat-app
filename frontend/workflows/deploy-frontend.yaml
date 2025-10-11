@@ -1,0 +1,76 @@
+name: Deploy Frontend to VM
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker build (dry-run)
+        run: docker build -t dry-run:test ./frontend
+
+      - name: Rsync frontend to VM
+        uses: burnett01/rsync-deployments@6.0.0
+        with:
+          switches: -avz --delete
+          path: ./frontend/
+          remote_path: /opt/chat-frontend/
+          remote_host: ${{ secrets.SSH_HOST }}
+          remote_user: ${{ secrets.SSH_USER }}
+          remote_port: ${{ secrets.SSH_PORT }}
+          ssh_private_key: ${{ secrets.SSH_KEY }}
+
+      - name: Remote deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          port: ${{ secrets.SSH_PORT }}
+          key: ${{ secrets.SSH_KEY }}
+          script_stop: true
+          envs: GITHUB_SHA,VITE_STEAM_API_KEY,VITE_BASE_URL,NODE_ENV
+          script: |
+            set -euo pipefail
+            APP_NAME="chat-frontend"
+            WORKDIR="/opt/chat-frontend"
+            IMAGE_TAG="${APP_NAME}:${GITHUB_SHA}"
+            PORT_NEW=5001
+            PORT_LIVE=5000
+            HEALTH_PATH="/"
+            HEALTH_URL="http://127.0.0.1:${PORT_NEW}${HEALTH_PATH}"
+            if ! command -v docker >/dev/null 2>&1; then
+              sudo apt update && sudo apt install -y docker.io docker-compose-plugin
+            fi
+            cd "${WORKDIR}"
+            printf "VITE_STEAM_API_KEY=%s\nVITE_BASE_URL=%s\nNODE_ENV=%s\n" \
+              "${VITE_STEAM_API_KEY}" "${VITE_BASE_URL}" "${NODE_ENV}" > .env
+            docker build --pull -t "${IMAGE_TAG}" .
+            docker rm -f ${APP_NAME}-new || true
+            docker run -d --name ${APP_NAME}-new \
+              --env-file ${WORKDIR}/.env \
+              -p 127.0.0.1:${PORT_NEW}:5000 \
+              --restart always \
+              "${IMAGE_TAG}"
+            for i in {1..30}; do
+              if curl -fsS "${HEALTH_URL}" >/dev/null; then
+                break
+              fi
+              sleep 2
+            done
+            curl -fsS "${HEALTH_URL}" >/dev/null || { docker rm -f ${APP_NAME}-new; exit 1; }
+            docker rm -f ${APP_NAME} || true
+            docker run -d --name ${APP_NAME} \
+              --env-file ${WORKDIR}/.env \
+              -p 127.0.0.1:${PORT_LIVE}:5000 \
+              --restart always \
+              "${IMAGE_TAG}"
+            docker rm -f ${APP_NAME}-new || true
+            docker image prune -f || true
