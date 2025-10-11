@@ -26,7 +26,7 @@ jobs:
           remote_host: ${{ secrets.SSH_HOST }}
           remote_user: ${{ secrets.SSH_USER }}
           remote_port: ${{ secrets.SSH_PORT }}
-          ssh_private_key: ${{ secrets.SSH_KEY }}
+          remote_key: ${{ secrets.SSH_KEY }}
 
       - name: Remote deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
