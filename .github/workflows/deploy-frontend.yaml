@@ -1,3 +1,28 @@
+name: Deploy Frontend to VM
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yaml'
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/thezohaibkhalid/chat-app
+  REPO_NAME: chat-app
+  APP_NAME: chat-frontend
+  IMAGE_TAG: ${{ github.sha }}
+  PORT_NEW: 5001
+  PORT_LIVE: 5000
+  VITE_STEAM_API_KEY: ${{ secrets.VITE_STEAM_API_KEY }}
+  VITE_BASE_URL: ${{ secrets.VITE_BASE_URL }}
+  NODE_ENV: ${{ secrets.NODE_ENV }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
