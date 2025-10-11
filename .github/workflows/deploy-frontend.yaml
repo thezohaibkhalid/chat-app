@@ -37,81 +37,100 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
             
+
+
   deploy:
     runs-on: ubuntu-latest
     needs: build_and_push
     steps:
-      - name: Zero-downtime deploy (slot switch 3001↔3002)
+      - name: Deploy to VM via SSH (zero-downtime slots)
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+          STEAM_API_SECRET: ${{ secrets.STEAM_API_SECRET }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          port: ${{ secrets.SSH_PORT }}
           key: ${{ secrets.SSH_KEY }}
-          script_stop: true
-          envs: IMAGE_TAG
+          port: ${{ secrets.SSH_PORT }}
+          timeout: 30m
+          envs: APP_NAME,DOCKER_IMAGE,IMAGE_TAG,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,MONGO_URI,STEAM_API_KEY,STEAM_API_SECRET,JWT_SECRET_KEY
           script: |
             set -euo pipefail
 
-            APP="chat-app"
-            IMG="${{ secrets.DOCKERHUB_USERNAME }}/chat-app"
+            APP_NAME="${APP_NAME:-chat-app}"
+            IMG_REPO="${DOCKER_IMAGE:-${DOCKERHUB_USERNAME}/chat-app}"
             TAG="${IMAGE_TAG:-latest}"
 
             ACTIVE_FILE="/etc/nginx/snippets/chat_upstream.conf"
             SLOT_A=3001
             SLOT_B=3002
 
+            echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
+
             if ! command -v docker >/dev/null 2>&1; then
               sudo apt-get update -y
-              sudo apt-get remove -y containerd.io || true
               sudo apt-get install -y docker.io docker-compose-plugin
               sudo systemctl enable --now docker
             fi
 
-            docker pull "${IMG}:${TAG}" || true
-            docker pull "${IMG}:latest" || true
-            if docker image inspect "${IMG}:${TAG}" >/dev/null 2>&1; then IMAGE="${IMG}:${TAG}"; else IMAGE="${IMG}:latest"; fi
+            sudo mkdir -p /etc/nginx/snippets
+            sudo tee /etc/nginx/snippets/chat_upstream.3001.conf >/dev/null <<'EOF'
+            set $chat_upstream http://127.0.0.1:3001;
+            EOF
+            sudo tee /etc/nginx/snippets/chat_upstream.3002.conf >/dev/null <<'EOF'
+            set $chat_upstream http://127.0.0.1:3002;
+            EOF
+            [ -e "${ACTIVE_FILE}" ] || sudo ln -sfn /etc/nginx/snippets/chat_upstream.3001.conf "${ACTIVE_FILE}"
+
+            docker pull "${IMG_REPO}:${TAG}" || true
+            docker pull "${IMG_REPO}:latest" || true
+            if docker image inspect "${IMG_REPO}:${TAG}" >/dev/null 2>&1; then IMG="${IMG_REPO}:${TAG}"; else IMG="${IMG_REPO}:latest"; fi
 
             ACTIVE_PORT=$(sudo awk '{print $NF}' "${ACTIVE_FILE}" | sed -E 's#.*/##; s#;##' | cut -d: -f2 || true)
-            if [ "${ACTIVE_PORT:-}" = "${SLOT_A}" ]; then
-              NEW_PORT="${SLOT_B}"
-            else
-              NEW_PORT="${SLOT_A}"
-            fi
+            if [ "${ACTIVE_PORT:-}" = "${SLOT_A}" ]; then NEW_PORT="${SLOT_B}"; else NEW_PORT="${SLOT_A}"; fi
+            NEW_CONTAINER="${APP_NAME}-slot-${NEW_PORT}"
+            OLD_CONTAINER="${APP_NAME}-slot-${ACTIVE_PORT:-${SLOT_A}}"
 
-            NEW_NAME="${APP}-slot-${NEW_PORT}"
-            OLD_PORT="${ACTIVE_PORT:-${SLOT_A}}"
-            OLD_NAME="${APP}-slot-${OLD_PORT}"
-
-            docker rm -f "${NEW_NAME}" 2>/dev/null || true
-            docker run -d --name "${NEW_NAME}" \
+            docker rm -f "${NEW_CONTAINER}" 2>/dev/null || true
+            docker run -d --name "${NEW_CONTAINER}" \
               -p 127.0.0.1:${NEW_PORT}:3000 \
               --restart unless-stopped \
               -e NODE_ENV=production \
               -e PORT=3000 \
-              -e MONGO_URI="${{ secrets.MONGO_URI }}" \
-              -e STEAM_API_KEY="${{ secrets.STEAM_API_KEY }}" \
-              -e STEAM_API_SECRET="${{ secrets.STEAM_API_SECRET }}" \
-              -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
-              "${IMAGE}"
+              -e MONGO_URI="${MONGO_URI}" \
+              -e STEAM_API_KEY="${STEAM_API_KEY}" \
+              -e STEAM_API_SECRET="${STEAM_API_SECRET}" \
+              -e JWT_SECRET_KEY="${JWT_SECRET_KEY}" \
+              "${IMG}"
 
-            for i in $(seq 1 30); do
-              if curl -fsS "http://127.0.0.1:${NEW_PORT}/" >/dev/null; then
-                echo "Healthy on ${NEW_PORT}"
-                break
-              fi
+            for i in $(seq 1 40); do
+              curl -fsS "http://127.0.0.1:${NEW_PORT}/" >/dev/null 2>&1 && break
               sleep 2
             done
             curl -fsS "http://127.0.0.1:${NEW_PORT}/" >/dev/null
 
+            PREV_TARGET=$(readlink -f "${ACTIVE_FILE}" || true)
             if [ "${NEW_PORT}" = "${SLOT_A}" ]; then
               sudo ln -sfn /etc/nginx/snippets/chat_upstream.3001.conf "${ACTIVE_FILE}"
             else
               sudo ln -sfn /etc/nginx/snippets/chat_upstream.3002.conf "${ACTIVE_FILE}"
             fi
-            sudo nginx -t && sudo systemctl reload nginx
 
-            docker rm -f "${OLD_NAME}" 2>/dev/null || true
+            sudo nginx -t || { [ -n "${PREV_TARGET}" ] && sudo ln -sfn "${PREV_TARGET}" "${ACTIVE_FILE}"; exit 1; }
+            sudo systemctl reload nginx
 
+            docker rm -f "${OLD_CONTAINER}" 2>/dev/null || true
+
+            USED_IDS=$(docker ps --format '{{.Image}}' | xargs -r docker image inspect -f '{{.Id}}' || true)
+            docker images "${IMG_REPO}" --format '{{.Repository}}:{{.Tag}} {{.ID}}' | while read -r ref id; do
+              KEEP=0; for used in ${USED_IDS}; do [ "$id" = "$used" ] && KEEP=1 && break; done
+              [ "$KEEP" -eq 0 ] && docker rmi -f "$ref" || true
+            done
             docker container prune -f >/dev/null 2>&1 || true
-            docker image prune -a -f >/dev/null 2>&1 || true
+            docker image prune -f >/dev/null 2>&1 || true
+            docker network prune -f >/dev/null 2>&1 || true
