@@ -11,31 +11,52 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
+      lowercase: true,
+      trim: true,
+      index: true,
+      validate: {
+        validator: function (email) {
+          return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        },
+        message: "Invalid email format",
+      },
     },
     password: {
       type: String,
       required: true,
       minlength: 6,
+      trim: true,
+      index: true,
     },
     bio: {
       type: String,
       default: "",
+      trim: true,
+      index: true,
     },
     profilePic: {
       type: String,
       default: "",
+      trim: true,
+      index: true,
     },
     nativeLanguage: {
       type: String,
       default: "",
+      trim: true,
+      index: true,
     },
     learningLanguage: {
       type: String,
       default: "",
+      trim: true,
+      index: true,
     },
     location: {
       type: String,
       default: "",
+      trim: true,
+      index: true,
     },
     isOnboarded: {
       type: Boolean,
@@ -47,6 +68,14 @@ const userSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    emailVerified: { type: Boolean, default: false },
+    otpHash: { type: String, select: false },
+    otpExpiresAt: { type: Date, select: false },
+    otpAttempts: { type: Number, default: 0, select: false },
+    otpLastSentAt: { type: Date, select: false },
+    twoFactorEmailOnLogin: { type: Boolean, default: true },
+    lockUntil: { type: Date, select: false },
+
   },
   { timestamps: true }
 );

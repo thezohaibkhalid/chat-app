@@ -14,6 +14,17 @@ export const logout = async () => {
   return response.data;
 };
 
+export const verifyOtp = async ({ code, otpToken }) => {
+  const response = await axiosInstance.post("/auth/verify-otp", { code, otpToken });
+  return response.data;
+};
+
+export const resendOtp = async ({ otpToken }) => {
+  const response = await axiosInstance.post("/auth/resend-otp", { otpToken });
+  return response.data;
+};
+
+
 export const getAuthUser = async () => {
   try {
     const res = await axiosInstance.get("/auth/me");

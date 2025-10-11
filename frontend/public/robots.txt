@@ -1,0 +1,50 @@
+User-agent: *
+Allow: /
+
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Slurp
+Allow: /
+Crawl-delay: 1
+
+Disallow: /api/
+Disallow: /admin/
+Disallow: /private/
+Disallow: /test/
+Disallow: /debug/
+Disallow: /node_modules/
+Disallow: /src/
+Disallow: /backend/
+Disallow: /.env
+Disallow: /.git/
+Disallow: /package.json
+Disallow: /package-lock.json
+Disallow: /vite.config.js
+Disallow: /tailwind.config.js
+Disallow: /eslint.config.js
+Disallow: /postcss.config.js
+
+Allow: /i.png
+Allow: /vite.svg
+Allow: /*.css
+Allow: /*.js
+Allow: /*.woff
+Allow: /*.woff2
+Allow: /*.ttf
+Allow: /*.eot
+
+Allow: /login
+Allow: /signup
+Allow: /chat
+Allow: /notifications
+Allow: /onboarding
+
+Host: chat.bitbuilders.tech
+
+Sitemap: https://chat.bitbuilders.tech/sitemap.xml

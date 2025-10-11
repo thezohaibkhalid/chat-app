@@ -55,13 +55,19 @@ jobs:
           STEAM_API_SECRET: ${{ secrets.STEAM_API_SECRET }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           VITE_STREAM_API_KEY: ${{ secrets.VITE_STREAM_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          COOKIE_NAME: ${{ secrets.COOKIE_NAME }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
           timeout: 30m
-          envs: APP_NAME,DOCKER_IMAGE,IMAGE_TAG,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,MONGO_URI,STEAM_API_KEY,STEAM_API_SECRET,JWT_SECRET_KEY,VITE_STREAM_API_KEY
+          envs: APP_NAME,DOCKER_IMAGE,IMAGE_TAG,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,MONGO_URI,STEAM_API_KEY,STEAM_API_SECRET,JWT_SECRET_KEY,VITE_STREAM_API_KEY,SMTP_HOST,SMTP_PORT,SMTP_USER,SMTP_PASS,MAIL_FROM,COOKIE_NAME
           script: |
             set -euo pipefail
 
@@ -110,6 +116,12 @@ jobs:
               -e STEAM_API_SECRET="${STEAM_API_SECRET}" \
               -e JWT_SECRET_KEY="${JWT_SECRET_KEY}" \
               -e VITE_STREAM_API_KEY="${VITE_STREAM_API_KEY}" \
+              -e SMTP_HOST="${SMTP_HOST}" \
+              -e SMTP_PORT="${SMTP_PORT}" \
+              -e SMTP_USER="${SMTP_USER}" \
+              -e SMTP_PASS="${SMTP_PASS}" \
+              -e MAIL_FROM="${MAIL_FROM}" \
+              -e COOKIE_NAME="${COOKIE_NAME}" \
               "${IMG}"
 
             for i in $(seq 1 40); do
