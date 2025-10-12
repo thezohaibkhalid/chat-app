@@ -3,6 +3,7 @@ import { ShipWheelIcon } from "lucide-react";
 import { Link } from "react-router";
 
 import useSignUp from "../hooks/useSignUp";
+import toast from "react-hot-toast";
 
 const SignUpPage = () => {
   const [signupData, setSignupData] = useState({
@@ -28,6 +29,9 @@ const SignUpPage = () => {
   const handleSignup = (e) => {
     e.preventDefault();
     signupMutation(signupData);
+    setSignupData({ fullName: "", email: "", password: "" });
+    toast.success("Account created successfully");
+    window.location.href = "/login";
   };
 
   return (
