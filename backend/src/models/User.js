@@ -28,6 +28,14 @@ const userSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    confirmPassword:
+      {
+        type: String,
+        required: true,
+        minlength: 6,
+        trim: true,
+        index: true,
+      },
     bio: {
       type: String,
       default: "",

@@ -33,6 +33,7 @@ export async function signup(req, res) {
   try {
     if (!email || !password || !fullName) return res.status(400).json({ message: "All fields are required" });
     if (password.length < 6) return res.status(400).json({ message: "Password must be at least 6 characters" });
+    const confirmPassword = password;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) return res.status(400).json({ message: "Invalid email format" });
 
@@ -46,6 +47,7 @@ export async function signup(req, res) {
       email: email.toLowerCase(),
       fullName,
       password,
+      confirmPassword,
       profilePic: randomAvatar,
     });
 
