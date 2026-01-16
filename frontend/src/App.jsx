@@ -1,13 +1,13 @@
 import { Navigate, Route, Routes } from "react-router";
+import {lazy, Suspense, useEffect} from "react";
 
 import HomePage from "./pages/HomePage.jsx";
 import SignUpPage from "./pages/SignUpPage.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import NotificationsPage from "./pages/NotificationsPage.jsx";
-import CallPage from "./pages/CallPage.jsx";
-import ChatPage from "./pages/ChatPage.jsx";
+const CallPage = lazy(() => import("./pages/CallPage.jsx"));
+const ChatPage = import("./pages/ChatPage.jsx");
 import OnboardingPage from "./pages/OnboardingPage.jsx";
-
 import { Toaster } from "react-hot-toast";
 
 import PageLoader from "./components/PageLoader.jsx";
@@ -18,7 +18,10 @@ import { useThemeStore } from "./store/useThemeStore.js";
 const App = () => {
   const { isLoading, authUser } = useAuthUser();
   const { theme } = useThemeStore();
-
+  useEffect(() => {
+    import("@stream-io/video-react-sdk/dist/css/styles.css");
+  }, []);
+  
   const isAuthenticated = Boolean(authUser);
   const isOnboarded = authUser?.isOnboarded;
 
@@ -67,7 +70,9 @@ const App = () => {
           path="/call/:id"
           element={
             isAuthenticated && isOnboarded ? (
-              <CallPage />
+              <Suspense fallback={<PageLoader />}>
+                <CallPage />
+              </Suspense>
             ) : (
               <Navigate to={!isAuthenticated ? "/login" : "/onboarding"} />
             )
