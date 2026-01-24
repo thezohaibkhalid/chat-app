@@ -4,6 +4,9 @@ import useAuthUser from "../hooks/useAuthUser";
 import { useQuery } from "@tanstack/react-query";
 import { getStreamToken } from "../lib/api";
 
+// Import stream-chat CSS only when this page is loaded
+import "stream-chat-react/dist/css/v2/index.css";
+
 import {
   Channel,
   ChannelHeader,
